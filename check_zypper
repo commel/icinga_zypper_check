@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+import argparse
+import subprocess
+import xml.etree.ElementTree as ET
+from enum import Enum
+
+class IcingaState(Enum):
+    OK = 0
+    WARNING = 1
+    CRITICAL = 2
+    UNKNOWN = 3
+
+CHECK_NAME = "zypper"
+
+def analyze_updates(result: str) -> dict:
+    updates = dict()
+    updates["packages"] = 0
+    updates["security"] = 0
+    updates["patches"] = 0
+
+    root = ET.fromstring(result)
+    for elem in root.findall('.//update'):
+        kind = elem.attrib["kind"]
+
+        if kind == "package":
+            updates["packages"] = updates["packages"] + 1
+        if kind == "patch":
+            if elem.attrib["category"] == "security":
+                updates["security"] = updates["security"] + 1
+            else:
+                updates["patches"] = updates["patches"] + 1
+
+    return updates
+
+def run(args):
+    result = subprocess.run(["/usr/bin/zypper", "-x", "lu"], check=True, stdout=subprocess.PIPE)
+    updates = analyze_updates(result.stdout)
+    generate_icinga_response(updates, args)
+
+def generate_icinga_response(updates: dict, args):
+    icinga_state: IcingaState = IcingaState.UNKNOWN
+
+    if updates["packages"] + updates["patches"] > args.w:
+        icinga_state = IcingaState.WARNING
+    else:
+        icinga_state = IcingaState.OK
+
+    if updates["security"] > 0 or (updates["packages"] + updates["patches"]) > args.c:
+        icinga_state = IcingaState.CRITICAL
+    
+    print("%s %s: %s updates available | updates=%d;%d;%d patches=%d;;;0;1" % (CHECK_NAME, icinga_state.name, 
+                                                             updates["packages"] + updates["security"] + updates["patches"],
+                                                             updates["packages"], args.w, args.c, updates["security"]))
+    exit(icinga_state.value)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog="check_zypper", description="Checker Plugin for Icinga2")
+    parser.add_argument("-w", type=int)
+    parser.add_argument("-c", type=int)
+    args = parser.parse_args()
+	
+    run(args)
