@@ -13,6 +13,6 @@ more. Place it somewhere accessible for Icinga.
 
 Security patches always trigger a critical.
 
-## TODO
-* Icinga command template
-* Icinga service template
+## Installation
+Place the zypper_check somewhere where Icinga can access it (e.g. /usr/local/bin). Then append the
+content of ```services.conf``` and ```commands.conf``` to your Icinga files.
