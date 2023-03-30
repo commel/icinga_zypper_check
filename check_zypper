@@ -12,12 +12,7 @@ class IcingaState(Enum):
 
 CHECK_NAME = "zypper"
 
-def analyze_updates(result: str) -> dict:
-    updates = dict()
-    updates["packages"] = 0
-    updates["security"] = 0
-    updates["patches"] = 0
-
+def analyze_updates(result: str, updates: dict) -> dict:
     root = ET.fromstring(result)
     for elem in root.findall('.//update'):
         kind = elem.attrib["kind"]
@@ -33,30 +28,43 @@ def analyze_updates(result: str) -> dict:
     return updates
 
 def run(args):
-    result = subprocess.run(["/usr/bin/zypper", "-x", "lu"], check=True, stdout=subprocess.PIPE)
-    updates = analyze_updates(result.stdout)
+    updates = dict()
+    updates["packages"] = 0
+    updates["security"] = 0
+    updates["patches"] = 0
+
+    result_lu = subprocess.run(["/usr/bin/zypper", "-x", "lu"], check=True, stdout=subprocess.PIPE)
+    updates = analyze_updates(result_lu.stdout, updates)
+    
+    result_lp = subprocess.run(["/usr/bin/zypper", "-x", "lp"], check=True, stdout=subprocess.PIPE)
+    updates = analyze_updates(result_lp.stdout, updates)
+
     generate_icinga_response(updates, args)
 
 def generate_icinga_response(updates: dict, args):
     icinga_state: IcingaState = IcingaState.UNKNOWN
 
-    if updates["packages"] + updates["patches"] > args.w:
+    if updates["packages"] > args.pack_w or updates["patches"] > args.patch_w:
         icinga_state = IcingaState.WARNING
     else:
         icinga_state = IcingaState.OK
 
-    if updates["security"] > 0 or (updates["packages"] + updates["patches"]) > args.c:
+    if (updates["security"] > 0) or (updates["packages"] > args.pack_c) or (updates["patches"] > args.patch_c):
         icinga_state = IcingaState.CRITICAL
     
-    print("%s %s: %s updates available | updates=%d;%d;%d patches=%d;;;0;1" % (CHECK_NAME, icinga_state.name, 
-                                                             updates["packages"] + updates["security"] + updates["patches"],
-                                                             updates["packages"], args.w, args.c, updates["security"]))
+    print("%s %s: %s updates available | updates=%d;%d;%d;; patches=%d;%d;%d;; security=%d;;;%d;%d" % (CHECK_NAME, icinga_state.name, 
+                                                                                                     updates["packages"] + updates["security"] + updates["patches"],
+                                                                                                     updates["packages"], args.pack_w, args.pack_c, 
+                                                                                                     updates["patches"], args.patch_w, args.patch_c,
+                                                                                                     updates["security"], 0, 1))
     exit(icinga_state.value)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="check_zypper", description="Checker Plugin for Icinga2")
-    parser.add_argument("-w", type=int)
-    parser.add_argument("-c", type=int)
+    parser.add_argument("-pack_w", type=int, default=10)
+    parser.add_argument("-pack_c", type=int, default=50)
+    parser.add_argument("-patch_w", type=int, default=5)
+    parser.add_argument("-patch_c", type=int, default=10)
     args = parser.parse_args()
 	
     run(args)
